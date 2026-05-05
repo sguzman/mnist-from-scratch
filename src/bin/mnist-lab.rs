@@ -289,22 +289,25 @@ fn main() -> Result<()> {
                 "perceptron" => {
                     let m: Perceptron = io::load_model(path)?;
                     let weights = m.weights.row(k).to_owned();
-                    let min = weights.fold(f32::INFINITY, |a, &b| a.min(b));
-                    let max = weights.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-                    (weights - min) / (max - min)
+                    // Only visualize positive weights
+                    let weights_pos = weights.mapv(|v| v.max(0.0));
+                    let max = weights_pos.fold(0.0, |a: f32, &b| a.max(b));
+                    if max > 0.0 { weights_pos / max } else { weights_pos }
                 }
                 "softmax" => {
                     let m: SoftmaxRegression = io::load_model(path)?;
                     let weights = m.weights.row(k).to_owned();
-                    let min = weights.fold(f32::INFINITY, |a, &b| a.min(b));
-                    let max = weights.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-                    (weights - min) / (max - min)
+                    // Only visualize positive weights
+                    let weights_pos = weights.mapv(|v| v.max(0.0));
+                    let max = weights_pos.fold(0.0, |a: f32, &b| a.max(b));
+                    if max > 0.0 { weights_pos / max } else { weights_pos }
                 }
                 "mlp" => {
                     let m: Mlp = io::load_model(path)?;
                     let mut x = Array1::from_elem(784, 0.5);
-                    let lr = 0.5;
-                    for _ in 0..200 {
+                    let lr = 1.0;
+                    let l2_penalty = 0.05; // Keep pixels from becoming purely random noise
+                    for _ in 0..500 {
                         let (a1, _z2, _) = m.forward(&x);
                         let w2_k = m.w2.row(k);
                         let mut dz1 = w2_k.to_owned();
@@ -314,7 +317,8 @@ fn main() -> Result<()> {
                             }
                         }
                         let grad = m.w1.t().dot(&dz1);
-                        x += &(grad * lr);
+                        // Gradient ascent + L2 weight decay to smooth it out
+                        x += &((grad - &x * l2_penalty) * lr);
                         x.mapv_inplace(|v| v.clamp(0.0, 1.0));
                     }
                     x
