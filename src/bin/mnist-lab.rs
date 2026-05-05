@@ -104,12 +104,32 @@ enum Commands {
 }
 
 fn render_image(img: &Array1<f32>) {
+    let mut blurred = Array1::zeros(784);
+    for r in 0..28 {
+        for c in 0..28 {
+            let mut sum = 0.0;
+            let mut count = 0.0;
+            for dr in -1..=1 {
+                for dc in -1..=1 {
+                    let nr = r as isize + dr;
+                    let nc = c as isize + dc;
+                    if nr >= 0 && nr < 28 && nc >= 0 && nc < 28 {
+                        let weight = if dr == 0 && dc == 0 { 2.0 } else { 1.0 };
+                        sum += img[(nr * 28 + nc) as usize] * weight;
+                        count += weight;
+                    }
+                }
+            }
+            blurred[r * 28 + c] = sum / count;
+        }
+    }
+
     let chars = ["  ", "░░", "▒▒", "▓▓", "██"];
-    let max = img.fold(0.0, |a: f32, &b| a.max(b));
+    let max = blurred.fold(0.0, |a: f32, &b| a.max(b));
     let scale = if max > 0.0 { 1.0 / max } else { 1.0 };
     for r in 0..28 {
         for c in 0..28 {
-            let mut val = img[r * 28 + c] * scale;
+            let mut val = blurred[r * 28 + c] * scale;
             if val < 0.25 { 
                 val = 0.0; // Cut out background noise
             } else { 
@@ -310,9 +330,10 @@ fn main() -> Result<()> {
                 "mlp" => {
                     let m: Mlp = io::load_model(path)?;
                     let mut x = Array1::from_elem(784, 0.5);
-                    let lr = 1.0;
-                    let l2_penalty = 0.05; // Keep pixels from becoming purely random noise
-                    for _ in 0..500 {
+                    let lr = 2.0;
+                    let l2_penalty = 0.01; 
+                    let tv_weight = 0.05; // Total variation for smooth strokes
+                    for _ in 0..1000 {
                         let (a1, _z2, _) = m.forward(&x);
                         let w2_k = m.w2.row(k);
                         let mut dz1 = w2_k.to_owned();
@@ -322,8 +343,20 @@ fn main() -> Result<()> {
                             }
                         }
                         let grad = m.w1.t().dot(&dz1);
-                        // Gradient ascent + L2 weight decay to smooth it out
-                        x += &((grad - &x * l2_penalty) * lr);
+                        
+                        let mut tv_grad = Array1::<f32>::zeros(784);
+                        for r in 0..28 {
+                            for c in 0..28 {
+                                let idx = r * 28 + c;
+                                let val = x[idx];
+                                if r > 0 { tv_grad[idx] += val - x[(r - 1) * 28 + c]; }
+                                if r < 27 { tv_grad[idx] += val - x[(r + 1) * 28 + c]; }
+                                if c > 0 { tv_grad[idx] += val - x[r * 28 + c - 1]; }
+                                if c < 27 { tv_grad[idx] += val - x[r * 28 + c + 1]; }
+                            }
+                        }
+                        
+                        x += &((grad - &x * l2_penalty - tv_grad * tv_weight) * lr);
                         x.mapv_inplace(|v| v.clamp(0.0, 1.0));
                     }
                     x
