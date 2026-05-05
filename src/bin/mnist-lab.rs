@@ -81,7 +81,6 @@ enum Commands {
         #[arg(short, long)]
         image: PathBuf,
     },
-    /// Inspect a digit from the dataset
     Inspect {
         /// Index of the digit to inspect
         #[arg(short, long)]
@@ -90,6 +89,34 @@ enum Commands {
         #[arg(short, long, default_value = "test")]
         dataset: String,
     },
+    /// Generate an ideal image for a digit
+    Generate {
+        /// The digit to generate (0-9)
+        #[arg(short, long)]
+        digit: u8,
+        /// Model type: perceptron, softmax, mlp
+        #[arg(short = 't', long, default_value = "mlp")]
+        model_type: String,
+        /// Path to the model file
+        #[arg(short, long, default_value = "model.json")]
+        path: PathBuf,
+    },
+}
+
+fn render_image(img: &Array1<f32>) {
+    for r in 0..28 {
+        for c in 0..28 {
+            let val = img[r * 28 + c];
+            if val > 0.5 {
+                print!("##");
+            } else if val > 0.1 {
+                print!("..");
+            } else {
+                print!("  ");
+            }
+        }
+        println!();
+    }
 }
 
 fn main() -> Result<()> {
