@@ -254,6 +254,50 @@ fn main() -> Result<()> {
             };
             info!("Prediction: {}", pred);
         }
+        Commands::Generate { digit, model_type, path } => {
+            info!("Generating 'ideal' digit {} using {} model from {:?}", digit, model_type, path);
+            let k = digit as usize;
+            
+            let img = match model_type.as_str() {
+                "perceptron" => {
+                    let m: Perceptron = io::load_model(path)?;
+                    let weights = m.weights.row(k).to_owned();
+                    let min = weights.fold(f32::INFINITY, |a, &b| a.min(b));
+                    let max = weights.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                    (weights - min) / (max - min)
+                }
+                "softmax" => {
+                    let m: SoftmaxRegression = io::load_model(path)?;
+                    let weights = m.weights.row(k).to_owned();
+                    let min = weights.fold(f32::INFINITY, |a, &b| a.min(b));
+                    let max = weights.fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+                    (weights - min) / (max - min)
+                }
+                "mlp" => {
+                    let m: Mlp = io::load_model(path)?;
+                    let mut x = Array1::from_elem(784, 0.5);
+                    let lr = 0.5;
+                    for _ in 0..200 {
+                        let (a1, _z2, _) = m.forward(&x);
+                        let w2_k = m.w2.row(k);
+                        let mut dz1 = w2_k.to_owned();
+                        for (i, &val) in a1.iter().enumerate() {
+                            if val <= 0.0 {
+                                dz1[i] = 0.0;
+                            }
+                        }
+                        let grad = m.w1.t().dot(&dz1);
+                        x += &(grad * lr);
+                        x.mapv_inplace(|v| v.clamp(0.0, 1.0));
+                    }
+                    x
+                }
+                _ => anyhow::bail!("Unknown model type: {}", model_type),
+            };
+            
+            println!("Generated Digit: {}", digit);
+            render_image(&img);
+        }
         Commands::Inspect { index, dataset } => {
             let ds = MnistDataset::load()?;
             let (images, labels) = if dataset == "train" {
@@ -266,21 +310,9 @@ fn main() -> Result<()> {
                 anyhow::bail!("Index out of bounds: {}", index);
             }
 
-            let img = images.row(index);
+            let img = images.row(index).to_owned();
             println!("Label: {}", labels[index]);
-            for r in 0..28 {
-                for c in 0..28 {
-                    let val = img[r * 28 + c];
-                    if val > 0.5 {
-                        print!("##");
-                    } else if val > 0.1 {
-                        print!("..");
-                    } else {
-                        print!("  ");
-                    }
-                }
-                println!();
-            }
+            render_image(&img);
         }
     }
 
