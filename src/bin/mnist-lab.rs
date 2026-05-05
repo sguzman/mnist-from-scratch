@@ -20,6 +20,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Fetch and prepare the MNIST dataset
+    Fetch,
     /// Train a model
     Train {
         /// Model type: perceptron, softmax, mlp
@@ -40,10 +42,25 @@ enum Commands {
         /// Specific digits to train on (e.g. 0,1 for binary)
         #[arg(short, long)]
         digits: Option<String>,
+        /// Export training metrics to this JSON file
+        #[arg(long)]
+        metrics_export: Option<PathBuf>,
     },
-    /// Evaluate a model
-    /// Evaluate a model
-    Eval {
+    /// Evaluate a model on the test set
+    #[command(alias = "eval")]
+    Evaluate {
+        /// Path to the model file
+        #[arg(short, long, default_value = "model.json")]
+        path: PathBuf,
+        /// Model type: perceptron, softmax, mlp
+        #[arg(short = 't', long, default_value = "mlp")]
+        model_type: String,
+        /// Show indices of misclassified digits
+        #[arg(long)]
+        show_misclassified: bool,
+    },
+    /// Run a standard battery of tests on a model
+    Test {
         /// Path to the model file
         #[arg(short, long, default_value = "model.json")]
         path: PathBuf,
@@ -52,6 +69,7 @@ enum Commands {
         model_type: String,
     },
     /// Predict a single digit from an image file
+    #[command(alias = "run")]
     Predict {
         /// Path to the model file
         #[arg(short, long, default_value = "model.json")]
@@ -83,7 +101,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Train { model, epochs, lr, hidden, output, digits } => {
+        Commands::Fetch => {
+            MnistDataset::fetch()?;
+            info!("MNIST dataset prepared in .cache/");
+        }
+        Commands::Train { model, epochs, lr, hidden, output, digits, metrics_export } => {
             let mut dataset = MnistDataset::load()?;
             
             if let Some(digits_str) = digits {
@@ -120,49 +142,92 @@ fn main() -> Result<()> {
 
             info!("Training {} for {} epochs...", model, epochs);
 
-            match model.as_str() {
+            let history = match model.as_str() {
                 "perceptron" => {
                     let mut m = Perceptron::new(784, 10, lr);
-                    train_perceptron(&mut m, &dataset, epochs)?;
+                    let hist = train_perceptron(&mut m, &dataset, epochs)?;
                     io::save_model(&m, output)?;
+                    hist
                 }
                 "softmax" => {
                     let mut m = SoftmaxRegression::new(784, 10, lr);
-                    train_softmax(&mut m, &dataset, epochs)?;
+                    let hist = train_softmax(&mut m, &dataset, epochs)?;
                     io::save_model(&m, output)?;
+                    hist
                 }
                 "mlp" => {
                     let mut m = Mlp::new(784, hidden, 10, lr);
-                    train_mlp(&mut m, &dataset, epochs)?;
+                    let hist = train_mlp(&mut m, &dataset, epochs)?;
                     io::save_model(&m, output)?;
+                    hist
                 }
                 _ => anyhow::bail!("Unknown model type: {}", model),
+            };
+
+            if let Some(export_path) = metrics_export {
+                let json = serde_json::to_string_pretty(&history)?;
+                std::fs::write(&export_path, json)?;
+                info!("Training history exported to {:?}", export_path);
             }
         }
-        Commands::Eval { path, model_type } => {
+        Commands::Evaluate { path, model_type, show_misclassified } => {
             let dataset = MnistDataset::load()?;
             info!("Evaluating {} from {:?}...", model_type, path);
 
-            match model_type.as_str() {
+            let metrics = match model_type.as_str() {
                 "perceptron" => {
                     let m: Perceptron = io::load_model(path)?;
-                    let metrics = Metrics::calculate(|x| m.forward(x), &dataset.test_images, &dataset.test_labels, 10);
-                    info!("Accuracy: {:.2}%", metrics.accuracy * 100.0);
-                    metrics.print_confusion_matrix();
+                    Metrics::calculate(|x| m.forward(x), &dataset.test_images, &dataset.test_labels, 10)
                 }
                 "softmax" => {
                     let m: SoftmaxRegression = io::load_model(path)?;
-                    let metrics = Metrics::calculate(|x| m.predict(x), &dataset.test_images, &dataset.test_labels, 10);
-                    info!("Accuracy: {:.2}%", metrics.accuracy * 100.0);
-                    metrics.print_confusion_matrix();
+                    Metrics::calculate(|x| m.predict(x), &dataset.test_images, &dataset.test_labels, 10)
                 }
                 "mlp" => {
                     let m: Mlp = io::load_model(path)?;
-                    let metrics = Metrics::calculate(|x| m.predict(x), &dataset.test_images, &dataset.test_labels, 10);
-                    info!("Accuracy: {:.2}%", metrics.accuracy * 100.0);
-                    metrics.print_confusion_matrix();
+                    Metrics::calculate(|x| m.predict(x), &dataset.test_images, &dataset.test_labels, 10)
                 }
                 _ => anyhow::bail!("Unknown model type: {}", model_type),
+            };
+
+            info!("Accuracy: {:.2}%", metrics.accuracy * 100.0);
+            metrics.print_confusion_matrix();
+
+            if show_misclassified {
+                info!("Misclassified examples (first 20):");
+                for (i, (&pred, &true_val)) in metrics.predictions.iter().zip(dataset.test_labels.iter()).enumerate().take(20) {
+                    if pred != true_val {
+                        info!("Index {}: Predicted {}, True {}", i, pred, true_val);
+                    }
+                }
+            }
+        }
+        Commands::Test { path, model_type } => {
+            let dataset = MnistDataset::load()?;
+            info!("Running standard battery of tests for {} using model {:?}", model_type, path);
+            
+            // For now, Test is just a simplified Evaluate
+            let acc = match model_type.as_str() {
+                "perceptron" => {
+                    let m: Perceptron = io::load_model(path)?;
+                    Metrics::calculate(|x| m.forward(x), &dataset.test_images, &dataset.test_labels, 10).accuracy
+                }
+                "softmax" => {
+                    let m: SoftmaxRegression = io::load_model(path)?;
+                    Metrics::calculate(|x| m.predict(x), &dataset.test_images, &dataset.test_labels, 10).accuracy
+                }
+                "mlp" => {
+                    let m: Mlp = io::load_model(path)?;
+                    Metrics::calculate(|x| m.predict(x), &dataset.test_images, &dataset.test_labels, 10).accuracy
+                }
+                _ => anyhow::bail!("Unknown model type: {}", model_type),
+            };
+            
+            info!("Standard Test Result: {}%", (acc * 100.0) as u32);
+            if acc > 0.9 {
+                info!("PASSED: High accuracy detected.");
+            } else {
+                info!("WARNING: Accuracy is lower than expected for high-tier performance.");
             }
         }
         Commands::Predict { path, model_type, image } => {
@@ -222,7 +287,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn train_perceptron(model: &mut Perceptron, dataset: &MnistDataset, epochs: usize) -> Result<()> {
+fn train_perceptron(model: &mut Perceptron, dataset: &MnistDataset, epochs: usize) -> Result<Vec<f32>> {
+    let mut history = Vec::new();
     for epoch in 1..=epochs {
         let pb = ProgressBar::new(dataset.train_images.nrows() as u64);
         pb.set_style(ProgressStyle::default_bar()
@@ -239,11 +305,13 @@ fn train_perceptron(model: &mut Perceptron, dataset: &MnistDataset, epochs: usiz
 
         let metrics = Metrics::calculate(|x| model.forward(x), &dataset.test_images, &dataset.test_labels, 10);
         info!("Epoch {}: Accuracy: {:.2}%", epoch, metrics.accuracy * 100.0);
+        history.push(metrics.accuracy);
     }
-    Ok(())
+    Ok(history)
 }
 
-fn train_softmax(model: &mut SoftmaxRegression, dataset: &MnistDataset, epochs: usize) -> Result<()> {
+fn train_softmax(model: &mut SoftmaxRegression, dataset: &MnistDataset, epochs: usize) -> Result<Vec<f32>> {
+    let mut history = Vec::new();
     for epoch in 1..=epochs {
         let pb = ProgressBar::new(dataset.train_images.nrows() as u64);
         pb.set_style(ProgressStyle::default_bar()
@@ -260,11 +328,13 @@ fn train_softmax(model: &mut SoftmaxRegression, dataset: &MnistDataset, epochs: 
 
         let metrics = Metrics::calculate(|x| model.predict(x), &dataset.test_images, &dataset.test_labels, 10);
         info!("Epoch {}: Accuracy: {:.2}%", epoch, metrics.accuracy * 100.0);
+        history.push(metrics.accuracy);
     }
-    Ok(())
+    Ok(history)
 }
 
-fn train_mlp(model: &mut Mlp, dataset: &MnistDataset, epochs: usize) -> Result<()> {
+fn train_mlp(model: &mut Mlp, dataset: &MnistDataset, epochs: usize) -> Result<Vec<f32>> {
+    let mut history = Vec::new();
     for epoch in 1..=epochs {
         let pb = ProgressBar::new(dataset.train_images.nrows() as u64);
         pb.set_style(ProgressStyle::default_bar()
@@ -281,6 +351,7 @@ fn train_mlp(model: &mut Mlp, dataset: &MnistDataset, epochs: usize) -> Result<(
 
         let metrics = Metrics::calculate(|x| model.predict(x), &dataset.test_images, &dataset.test_labels, 10);
         info!("Epoch {}: Accuracy: {:.2}%", epoch, metrics.accuracy * 100.0);
+        history.push(metrics.accuracy);
     }
-    Ok(())
+    Ok(history)
 }

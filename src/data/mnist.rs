@@ -23,7 +23,7 @@ pub struct MnistDataset {
 }
 
 impl MnistDataset {
-    pub fn load() -> Result<Self> {
+    pub fn fetch() -> Result<()> {
         let cache_dir = PathBuf::from(".cache");
         if !cache_dir.exists() {
             fs::create_dir_all(&cache_dir)?;
@@ -37,8 +37,16 @@ impl MnistDataset {
                 let response = reqwest::blocking::get(url)?.bytes()?;
                 let mut f = File::create(&path)?;
                 f.write_all(&response)?;
+            } else {
+                info!("{} already exists in cache.", file);
             }
         }
+        Ok(())
+    }
+
+    pub fn load() -> Result<Self> {
+        Self::fetch()?;
+        let cache_dir = PathBuf::from(".cache");
 
         info!("Parsing MNIST data...");
         let train_images = load_images(cache_dir.join("train-images-idx3-ubyte.gz"))?;

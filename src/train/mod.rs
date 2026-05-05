@@ -3,6 +3,7 @@ use ndarray::prelude::*;
 pub struct Metrics {
     pub accuracy: f32,
     pub confusion_matrix: Array2<usize>,
+    pub predictions: Vec<u8>,
 }
 
 impl Metrics {
@@ -10,12 +11,14 @@ impl Metrics {
     where F: Fn(&Array1<f32>) -> usize {
         let mut correct = 0;
         let mut confusion = Array2::zeros((num_classes, num_classes));
+        let mut predictions = Vec::with_capacity(images.nrows());
 
         for i in 0..images.nrows() {
             let x = images.row(i).to_owned();
             let y = labels[i] as usize;
             let pred = predict(&x);
 
+            predictions.push(pred as u8);
             if pred == y {
                 correct += 1;
             }
@@ -27,6 +30,7 @@ impl Metrics {
         Self {
             accuracy: correct as f32 / images.nrows() as f32,
             confusion_matrix: confusion,
+            predictions,
         }
     }
 
