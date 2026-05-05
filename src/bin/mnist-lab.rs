@@ -329,21 +329,42 @@ fn main() -> Result<()> {
                 }
                 "mlp" => {
                     let m: Mlp = io::load_model(path)?;
-                    let mut x = Array1::from_elem(784, 0.5);
-                    let lr = 2.0;
-                    let l2_penalty = 0.01; 
-                    let tv_weight = 0.05; // Total variation for smooth strokes
-                    for _ in 0..1000 {
+                    let mut x = Array1::<f32>::zeros(784); // Start from black
+                    let lr = 0.5;
+                    let tv_weight = 0.1;
+                    
+                    for epoch in 0..1500 {
                         let (a1, _z2, _) = m.forward(&x);
                         let w2_k = m.w2.row(k);
                         let mut dz1 = w2_k.to_owned();
                         for (i, &val) in a1.iter().enumerate() {
-                            if val <= 0.0 {
-                                dz1[i] = 0.0;
+                            if val <= 0.0 { dz1[i] = 0.0; }
+                        }
+                        let mut grad = m.w1.t().dot(&dz1);
+                        
+                        // 1. Gradient Smoothing (Gaussian-ish blur on the gradient)
+                        let mut smoothed_grad = Array1::<f32>::zeros(784);
+                        for r in 0..28 {
+                            for c in 0..28 {
+                                let mut sum = 0.0;
+                                let mut count = 0.0;
+                                for dr in -1..=1 {
+                                    for dc in -1..=1 {
+                                        let nr = r as isize + dr;
+                                        let nc = c as isize + dc;
+                                        if nr >= 0 && nr < 28 && nc >= 0 && nc < 28 {
+                                            let weight = if dr == 0 && dc == 0 { 2.0 } else { 1.0 };
+                                            sum += grad[(nr * 28 + nc) as usize] * weight;
+                                            count += weight;
+                                        }
+                                    }
+                                }
+                                smoothed_grad[r * 28 + c] = sum / count;
                             }
                         }
-                        let grad = m.w1.t().dot(&dz1);
-                        
+                        grad = smoothed_grad;
+
+                        // 2. TV Penalty Gradient
                         let mut tv_grad = Array1::<f32>::zeros(784);
                         for r in 0..28 {
                             for c in 0..28 {
@@ -356,15 +377,32 @@ fn main() -> Result<()> {
                             }
                         }
                         
-                        x += &((grad - &x * l2_penalty - tv_grad * tv_weight) * lr);
+                        // Update with strong decay (L2) to keep background clean
+                        let decay = 0.5; 
+                        let tv_weight = 0.2;
+                        let step_lr = lr * (1.0 - (epoch as f32 / 1500.0)); // Annealing
+                        x += &((grad - &x * decay - tv_grad * tv_weight) * step_lr);
                         x.mapv_inplace(|v| v.clamp(0.0, 1.0));
                     }
                     x
                 }
-                _ => anyhow::bail!("Unknown model type: {}", model_type),
+                "average" => {
+                    info!("Computing ground truth average for digit {}...", digit);
+                    let ds = MnistDataset::load()?;
+                    let mut sum = Array1::<f32>::zeros(784);
+                    let mut count = 0.0;
+                    for i in 0..ds.train_labels.len() {
+                        if ds.train_labels[i] == digit {
+                            sum += &ds.train_images.row(i);
+                            count += 1.0;
+                        }
+                    }
+                    if count > 0.0 { sum / count } else { sum }
+                }
+                _ => anyhow::bail!("Unknown model type: {}. Options: perceptron, softmax, mlp, average", model_type),
             };
             
-            println!("Generated Digit: {}", digit);
+            println!("Generated Digit Representation: {} ({})", digit, model_type);
             render_image(&img);
         }
         Commands::Inspect { index, dataset } => {
