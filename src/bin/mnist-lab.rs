@@ -331,7 +331,7 @@ fn main() -> Result<()> {
                     let m: Mlp = io::load_model(path)?;
                     let mut x = Array1::<f32>::zeros(784); // Start from black
                     let lr = 0.5;
-                    let tv_weight = 0.1;
+                    let _tv_weight = 0.1;
                     
                     for epoch in 0..1500 {
                         let (a1, _z2, _) = m.forward(&x);
