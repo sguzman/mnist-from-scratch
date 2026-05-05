@@ -104,16 +104,17 @@ enum Commands {
 }
 
 fn render_image(img: &Array1<f32>) {
+    let chars = ["  ", "░░", "▒▒", "▓▓", "██"];
+    let max = img.fold(0.0, |a: f32, &b| a.max(b));
+    let scale = if max > 0.0 { 1.0 / max } else { 1.0 };
     for r in 0..28 {
         for c in 0..28 {
-            let val = img[r * 28 + c];
-            if val > 0.5 {
-                print!("##");
-            } else if val > 0.1 {
-                print!("..");
-            } else {
-                print!("  ");
-            }
+            let mut val = img[r * 28 + c] * scale;
+            if val < 0.0 { val = 0.0; }
+            val = val.powf(0.5); // Gamma correction to make faint features more visible
+            if val > 0.99 { val = 0.99; }
+            let idx = (val * chars.len() as f32) as usize;
+            print!("{}", chars[idx.min(chars.len() - 1)]);
         }
         println!();
     }
