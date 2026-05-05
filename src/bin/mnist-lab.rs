@@ -110,8 +110,12 @@ fn render_image(img: &Array1<f32>) {
     for r in 0..28 {
         for c in 0..28 {
             let mut val = img[r * 28 + c] * scale;
+            if val < 0.25 { 
+                val = 0.0; // Cut out background noise
+            } else { 
+                val = ((val - 0.25) / 0.75).powf(0.5); // Enhance the remaining signal
+            }
             if val < 0.0 { val = 0.0; }
-            val = val.powf(0.5); // Gamma correction to make faint features more visible
             if val > 0.99 { val = 0.99; }
             let idx = (val * chars.len() as f32) as usize;
             print!("{}", chars[idx.min(chars.len() - 1)]);
