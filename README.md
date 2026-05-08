@@ -1,4 +1,4 @@
-# Iron Digits: MNIST from Scratch in Rust
+# MNIST from Scratch in Rust
 
 A high-performance, educational machine learning laboratory for the MNIST
 dataset, built entirely from scratch in Rust. This project implements

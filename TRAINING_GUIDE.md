@@ -1,7 +1,7 @@
-# 🧠 Training Guide: How Iron Digits Learns
+# 🧠 Training Guide: How the Models Learn
 
 This guide provides a deep dive into the machine learning engineering behind
-**Iron Digits**. We'll explore the mathematical foundations, the training loop
+this project. We'll explore the mathematical foundations, the training loop
 implementation, and how to optimize your models for maximum accuracy.
 
 ---
@@ -9,7 +9,7 @@ implementation, and how to optimize your models for maximum accuracy.
 ## 1. The Core Philosophy
 
 In most modern ML projects, training is a black box handled by frameworks like
-PyTorch. In **Iron Digits**, we've unrolled that box. Training is the process
+PyTorch. In this project, we've unrolled that box. Training is the process
 of iteratively adjusting thousands of small numbers (weights and biases) so
 that a specific input (a 28x28 grid of pixels) results in the correct output
 (a digit 0-9).
@@ -138,4 +138,4 @@ row[j] -= (d_scores[i] * learning_rate) * xj;
 
 ---
 
-*You are now a master of the Iron Digits training pipeline. Happy learning!*
+*You are now a master of the training pipeline. Happy learning!*
